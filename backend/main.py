@@ -1,6 +1,7 @@
 import os
 import json
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
 from typing import List, Literal, Dict, Any, Optional
@@ -79,6 +80,17 @@ class Hairstyle(BaseModel):
 app = FastAPI(
     title="HairStyle AI Service",
     description="Provides AI-powered face analysis and hairstyle recommendations.",
+)
+
+# --- CORS Middleware ---
+# This allows the Flutter app (or any other web client) to make requests
+# to this backend server, which is hosted on a different domain.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allows all headers
 )
 
 
@@ -209,7 +221,7 @@ async def get_recommendations(request: RecommendationRequest):
 
         # 6. Call the AI model for recommendations
         completion = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo", # Cheaper, faster model for ranking
+            model="gpt-4o", 
             messages=[
                 {"role": "system", "content": "You are an expert AI stylist."},
                 {"role": "user", "content": prompt}
