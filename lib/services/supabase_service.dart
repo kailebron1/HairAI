@@ -130,11 +130,34 @@ class SupabaseService {
   // Fetch all hairstyles from the database with retry logic
   static Future<List<HairstyleData>> getHairstyles({
     Map<String, dynamic>? analysis,
+    List<int>? rankedIds,
   }) async {
     return await _executeWithRetry(() async {
       if (kDebugMode) {
         print('DEBUG: Attempting to fetch hairstyles from Supabase...');
       }
+
+      if (rankedIds != null && rankedIds.isNotEmpty) {
+        // Fetch specific hairstyles by ID and preserve the ranked order
+        final response = await _client
+            .from('hairstyles')
+            .select('*')
+            .inFilter('id', rankedIds);
+
+        // Reorder the results to match the ranked list
+        final hairstylesMap = {for (var h in response) h['id']: h};
+        final orderedHairstyles = rankedIds
+            .map((id) => hairstylesMap[id])
+            .where((h) => h != null)
+            .cast<Map<String, dynamic>>()
+            .toList();
+
+        return orderedHairstyles
+            .map((hairstyle) => HairstyleData.fromSupabase(hairstyle))
+            .toList();
+      }
+
+      // Fallback to the old filtering logic if no ranked IDs are provided
       var query = _client.from('hairstyles').select('*');
 
       if (analysis != null) {

@@ -177,7 +177,18 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
       final analysis = await AnalysisService.analyzeImage(imageUrl);
       _analysisResult = analysis;
 
-      // 3. Save the session to Supabase
+      // 3. Get AI-powered recommendations
+      if (_quizData == null) {
+        throw Exception(
+          "Please complete the hair quiz before getting recommendations.",
+        );
+      }
+      final rankedIds = await AnalysisService.getRecommendations(
+        analysisResult: _analysisResult!,
+        quizData: _quizData!.toJson(),
+      );
+
+      // 4. Save the session to Supabase (optional, could be done in parallel)
       await StorageService.saveUploadSession(
         imageUrl: imageUrl,
         analysisData: _analysisResult!,
@@ -189,8 +200,8 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
         _currentState = AppState.results;
       });
 
-      // 4. Fetch personalized recommendations
-      _fetchHairstyles(analysisResult: _analysisResult);
+      // 5. Fetch the recommended hairstyles in the correct order
+      _fetchHairstyles(rankedIds: rankedIds);
     } catch (e) {
       setState(() {
         _isAnalyzing = false;
@@ -987,7 +998,10 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
   }
 
   // Fetch hairstyles from Supabase
-  Future<void> _fetchHairstyles({Map<String, dynamic>? analysisResult}) async {
+  Future<void> _fetchHairstyles({
+    Map<String, dynamic>? analysisResult,
+    List<int>? rankedIds,
+  }) async {
     if (_hairstyles.isNotEmpty && analysisResult == null) {
       return; // Don't fetch if already loaded and not a new analysis
     }
@@ -1000,6 +1014,7 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
 
       final hairstyles = await SupabaseService.getHairstyles(
         analysis: analysisResult,
+        rankedIds: rankedIds,
       );
 
       if (!mounted) return;
