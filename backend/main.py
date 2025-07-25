@@ -24,6 +24,21 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 
+# --- Helper Functions ---
+def parse_json_field(value: Any) -> list:
+    """Safely parse a string field that could be a JSON list or a comma-separated string."""
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, str):
+        return []
+    try:
+        # It might be a proper JSON array string, e.g., '["oval", "square"]'
+        return json.loads(value)
+    except json.JSONDecodeError:
+        # It might be a comma-separated string, e.g., 'fine, medium, coarse'
+        return [item.strip() for item in value.split(',') if item.strip()]
+
+
 # --- Pydantic Models for Strict Data Validation ---
 class ImageAnalysisRequest(BaseModel):
     image_url: str
@@ -158,26 +173,41 @@ async def analyze_image(request: ImageAnalysisRequest):
 async def get_recommendations(request: RecommendationRequest):
     """
     Accepts user analysis and quiz data, fetches all hairstyles,
-    and uses an AI language model to return a ranked list of the top 5 hairstyle IDs.
+    and uses OpenAI to rank them, returning an ordered list of hairstyle IDs.
     """
     try:
         # 1. Fetch all hairstyles from Supabase
-        response = supabase.table('hairstyles').select('*').execute()
+        response = supabase.from_("hairstyles").select("*").execute()
         hairstyles_data = response.data
         if not hairstyles_data:
             raise HTTPException(status_code=404, detail="No hairstyles found in the database.")
 
-        # 2. Format data for the prompt
-        hairstyles_json_str = json.dumps([Hairstyle(**h).dict() for h in hairstyles_data])
-        
-        # 3. Construct the prompt for the AI
+        # 2. Pre-process data to handle stringified JSON fields from Supabase
+        processed_hairstyles = []
+        for h in hairstyles_data:
+            h_copy = h.copy()
+            h_copy['face_shape'] = parse_json_field(h.get('face_shape'))
+            h_copy['skin_tones'] = parse_json_field(h.get('skin_tones'))
+            h_copy['hair_texture'] = parse_json_field(h.get('hair_texture'))
+            h_copy['tags'] = parse_json_field(h.get('tags'))
+            processed_hairstyles.append(h_copy)
+
+        # 3. Convert to list of Pydantic models for structured data and validation
+        hairstyles = [Hairstyle(**h) for h in processed_hairstyles]
+
+        # 4. Prepare data for OpenAI prompt
+        # Convert Pydantic models to a list of dictionaries for JSON serialization
+        hairstyles_json = [h.model_dump() for h in hairstyles]
+        hairstyles_json_str = json.dumps(hairstyles_json, indent=2)
+
+        # 5. Create the prompt for OpenAI
         prompt = RECOMMENDATION_PROMPT_TEMPLATE.format(
             analysis_result=request.analysis_result.dict(),
             quiz_data=request.quiz_data,
             hairstyles=hairstyles_json_str
         )
 
-        # 4. Call the AI model for recommendations
+        # 6. Call the AI model for recommendations
         completion = openai_client.chat.completions.create(
             model="gpt-3.5-turbo", # Cheaper, faster model for ranking
             messages=[
