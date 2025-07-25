@@ -1,0 +1,33 @@
+{
+  "postgresql.databases": [
+    {
+      "name": "Supabase - HairStyle AI",
+      "host": "db.whybphphnjchcbnuxeph.supabase.co",
+      "port": 5432,
+      "database": "postgres",
+      "username": "postgres",
+      "password": "woHCWXmJx8U3SLIH",
+      "ssl": true,
+      "group": "Supabase Projects"
+    }
+  ],
+  "postgresql.defaultDatabase": "Supabase - HairStyle AI",
+  "sqltools.connections": [
+    {
+      "pgOptions": {
+        "ssl": {
+          "rejectUnauthorized": false
+        },
+        "connectionTimeoutMillis": 30000
+      },
+      "previewLimit": 50,
+      "server": "aws-0-us-west-1.pooler.supabase.com",
+      "port": 5432,
+      "driver": "PostgreSQL",
+      "name": "Supabase Hair App",
+      "database": "postgres",
+      "username": "postgres.whybphphnjchcbnuxeph",
+      "password": "woHCWXmJx8U3SLIH"
+    }
+  ]
+} 
