@@ -133,11 +133,23 @@ async def analyze_image(request: ImageAnalysisRequest):
         if not raw_json:
             raise HTTPException(status_code=500, detail="OpenAI returned an empty response.")
         
-        analysis_data = json.loads(raw_json)
-        validated_data = ImageAnalysisResult(**analysis_data)
+        analysis_content = raw_json
+        if not analysis_content:
+            raise HTTPException(status_code=500, detail="OpenAI returned empty content.")
+
+        analysis_data = json.loads(analysis_content)
+
+        # Validate the data with Pydantic, while also injecting the raw data
+        validated_data = ImageAnalysisResult(
+            face_shape=analysis_data.get("face_shape"),
+            skin_tone=analysis_data.get("skin_tone"),
+            hair_color=analysis_data.get("hair_color"),
+            hair_length=analysis_data.get("hair_length"),
+            raw_analysis_data=analysis_data
+        )
         return validated_data
-    except ValidationError as e:
-        raise HTTPException(status_code=500, detail=f"OpenAI response did not match expected format: {e}")
+    except json.JSONDecodeError:
+        print(f"ERROR: Failed to decode JSON from OpenAI: {analysis_content}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
