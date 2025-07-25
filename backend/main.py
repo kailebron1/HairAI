@@ -3,7 +3,7 @@ import json
 from fastapi import FastAPI, HTTPException
 from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
-from typing import List, Literal, Dict, Any
+from typing import List, Literal, Dict, Any, Optional
 from supabase import create_client, Client
 
 # --- Configuration ---
@@ -25,11 +25,15 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 
 # --- Pydantic Models for Strict Data Validation ---
+class ImageAnalysisRequest(BaseModel):
+    image_url: str
+
 class ImageAnalysisResult(BaseModel):
     face_shape: Literal["oval", "round", "square", "heart", "diamond"]
     skin_tone: Literal["light", "olive", "dark", "asian"]
     hair_color: Literal["blonde", "brown", "black", "grey", "red"]
     hair_length: Literal["short", "medium", "long"]
+    raw_analysis_data: Dict[str, Any]
 
 class QuizData(BaseModel):
     hairTexture: str
@@ -41,7 +45,7 @@ class QuizData(BaseModel):
 
 class RecommendationRequest(BaseModel):
     analysis_result: ImageAnalysisResult
-    quiz_data: QuizData
+    quiz_data: Dict[str, Any]
 
 class Hairstyle(BaseModel):
     id: int
@@ -52,6 +56,8 @@ class Hairstyle(BaseModel):
     hair_texture: List[str]
     hair_length: str
     tags: List[str]
+    image_gallery: List[Dict[str, Any]] = []
+    tags: Optional[List[str]] = None
 
 
 # --- FastAPI Application ---
@@ -97,15 +103,16 @@ Return ONLY a JSON array of the top 5 integer IDs for the best-fitting hairstyle
 
 # --- API Endpoints ---
 @app.post("/analyze", response_model=ImageAnalysisResult)
-async def analyze_image(request: BaseModel):
+async def analyze_image(request: ImageAnalysisRequest):
     """
-    Accepts an image URL, analyzes it with OpenAI's vision model,
-    and returns a structured JSON object with facial attributes.
+    Analyzes an image from a URL to determine facial attributes using OpenAI.
     """
-    image_url = getattr(request, 'image_url', None)
+    image_url = request.image_url
     if not image_url:
         raise HTTPException(status_code=400, detail="image_url is required")
-        
+
+    print(f"DEBUG: Received image URL for analysis: {image_url}")
+
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4o",
@@ -154,7 +161,7 @@ async def get_recommendations(request: RecommendationRequest):
         # 3. Construct the prompt for the AI
         prompt = RECOMMENDATION_PROMPT_TEMPLATE.format(
             analysis_result=request.analysis_result.dict(),
-            quiz_data=request.quiz_data.dict(),
+            quiz_data=request.quiz_data,
             hairstyles=hairstyles_json_str
         )
 
@@ -198,4 +205,4 @@ async def get_recommendations(request: RecommendationRequest):
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "HairStyle AI Service is running."}
+    return {"message": "Server is running"}
