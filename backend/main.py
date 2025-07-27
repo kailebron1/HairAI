@@ -260,6 +260,11 @@ async def get_recommendations(request: RecommendationRequest):
         # The prompt asks for a JSON object with a 'recommendations' key.
         try:
             response_data = json.loads(raw_response)
+            
+            # Defensive check: ensure response_data is a dictionary
+            if not isinstance(response_data, dict):
+                raise ValueError(f"AI response was not a JSON object (dictionary). Got: {type(response_data)}")
+
             recommendations = response_data.get("recommendations")
 
             if not recommendations or not isinstance(recommendations, list):
@@ -269,11 +274,16 @@ async def get_recommendations(request: RecommendationRequest):
             validated_recommendations = [RecommendationResponse(**item) for item in recommendations]
             return validated_recommendations
 
-        except (json.JSONDecodeError, ValidationError) as e:
-            raise HTTPException(status_code=500, detail=f"Failed to parse or validate AI recommendation response: {e}")
+        except (json.JSONDecodeError, ValidationError, ValueError) as e:
+            # Log the problematic response for debugging
+            print(f"ERROR: Failed to parse or validate AI response. Error: {e}")
+            print(f"ERROR: Raw AI response was: {raw_response}")
+            raise HTTPException(status_code=500, detail=f"Failed to process AI recommendation response: {e}")
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+        # Log unexpected errors for debugging
+        print(f"FATAL: An unexpected error occurred in /recommend: {e}")
+        raise HTTPException(status_code=500, detail=f"An unexpected server error occurred: {e}")
 
 
 @app.get("/")
