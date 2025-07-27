@@ -173,7 +173,7 @@ async def analyze_image(request: ImageAnalysisRequest):
 
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": IMAGE_ANALYSIS_PROMPT},
                 {
@@ -187,9 +187,18 @@ async def analyze_image(request: ImageAnalysisRequest):
             max_tokens=300,
             response_format={"type": "json_object"},
         )
+
+        if not response.choices or not response.choices[0].message:
+            print(f"ERROR: OpenAI response is missing expected structure. Full response: {response.model_dump_json(indent=2)}")
+            raise HTTPException(status_code=500, detail="OpenAI returned an invalid response structure.")
+
         raw_json = response.choices[0].message.content
         if not raw_json:
-            raise HTTPException(status_code=500, detail="OpenAI returned an empty response.")
+            finish_reason = response.choices[0].finish_reason
+            print(f"ERROR: OpenAI returned an empty message. Finish reason: '{finish_reason}'. Full response: {response.model_dump_json(indent=2)}")
+            if finish_reason == 'content_filter':
+                raise HTTPException(status_code=400, detail="The provided image was flagged by our safety system and could not be processed.")
+            raise HTTPException(status_code=500, detail=f"OpenAI returned an empty response. Finish reason: {finish_reason}")
         
         analysis_content = raw_json
         if not analysis_content:
@@ -209,6 +218,7 @@ async def analyze_image(request: ImageAnalysisRequest):
         return validated_data
     except json.JSONDecodeError:
         print(f"ERROR: Failed to decode JSON from OpenAI: {analysis_content}")
+        raise HTTPException(status_code=500, detail=f"Failed to decode JSON from OpenAI: {analysis_content}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
