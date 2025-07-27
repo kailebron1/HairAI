@@ -300,6 +300,9 @@ async def get_recommendations(request: RecommendationRequest):
         if not raw_response:
             raise HTTPException(status_code=500, detail="AI recommendation model returned an empty response.")
 
+        # DEBUG: Print raw AI response for diagnostics
+        print("DEBUG: Raw AI response from OpenAI:\n" + raw_response)
+
         # Clean up the response: remove leading/trailing whitespace and optional ```json fencing
         clean_response = raw_response.strip()
         if clean_response.startswith("```"):
