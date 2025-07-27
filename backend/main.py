@@ -284,13 +284,21 @@ async def get_recommendations(request: RecommendationRequest):
             response_format={"type": "json_object"},
         )
         
-        raw_response = completion.choices[0].message.content
+        raw_response = completion.choices[0].message.content or ""
         if not raw_response:
             raise HTTPException(status_code=500, detail="AI recommendation model returned an empty response.")
 
+        # Clean up the response: remove leading/trailing whitespace and optional ```json fencing
+        clean_response = raw_response.strip()
+        if clean_response.startswith("```"):
+            # remove the first ``` line and the last ``` if present
+            clean_response = clean_response.lstrip("` ").lstrip("json").strip()
+            if clean_response.endswith("```"):
+                clean_response = clean_response[: -3].strip()
+
         # The prompt asks for a JSON object with a 'recommendations' key.
         try:
-            response_data = json.loads(raw_response)
+            response_data = json.loads(clean_response)
             
             # Defensive check: ensure response_data is a dictionary
             if not isinstance(response_data, dict):
