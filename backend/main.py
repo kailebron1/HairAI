@@ -39,6 +39,18 @@ def parse_json_field(value: Any) -> list:
         # It might be a comma-separated string, e.g., 'fine, medium, coarse'
         return [item.strip() for item in value.split(',') if item.strip()]
 
+def _normalize_keys(obj):
+    """Recursively strip leading newlines (and any surrounding whitespace) from all dict keys.
+    The GPT model sometimes prefixes keys with a stray newline which survives json.loads
+    and breaks downstream validation. This helper makes the structure usable without
+    changing values.
+    """
+    if isinstance(obj, dict):
+        return {k.lstrip("\n").strip(): _normalize_keys(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize_keys(v) for v in obj]
+    return obj
+
 
 # --- Pydantic Models for Strict Data Validation ---
 class ImageAnalysisRequest(BaseModel):
@@ -298,7 +310,7 @@ async def get_recommendations(request: RecommendationRequest):
 
         # The prompt asks for a JSON object with a 'recommendations' key.
         try:
-            response_data = json.loads(clean_response)
+            response_data = _normalize_keys(json.loads(clean_response))
             
             # Defensive check: ensure response_data is a dictionary
             if not isinstance(response_data, dict):
