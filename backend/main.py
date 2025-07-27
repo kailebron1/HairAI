@@ -115,26 +115,47 @@ You MUST respond with a valid JSON object that strictly adheres to the following
 RECOMMENDATION_PROMPT_TEMPLATE = """
 You are an expert AI stylist. Your task is to provide personalized hairstyle recommendations based on a user's facial analysis and personal preferences from a quiz.
 
-You will be given the user's data and a list of available hairstyles.
-Your response MUST be a single, valid JSON object.
-This JSON object MUST contain a single key named "recommendations".
-The value of "recommendations" MUST be a JSON array.
-This array MUST contain EXACTLY 5 hairstyle objects, ranked from best to worst.
-Each object in the array MUST have two keys: "id" (the integer ID of the hairstyle) and "explanation" (a string explaining the choice).
-
-**CRITICAL:** Do NOT return a simple list of IDs. Your response must be a JSON object with the "recommendations" key, containing a list of objects, each with an "id" and an "explanation". Failure to follow this format will result in an error.
-
-**User Data:**
+**INPUTS:**
+1. **User Data:**
 - Image Analysis: {analysis_result}
 - Quiz Responses: {quiz_data}
+2. **Available Hairstyles:**
+- A JSON list of hairstyle objects: {hairstyles}
 
-**Available Hairstyles (JSON format):**
-{hairstyles}
+**TASK:**
+1. Analyze the user data.
+2. Compare the user data to the attributes of each hairstyle in the provided list.
+3. Select the top 5 best-fitting hairstyles for the user, ranked from best to worst.
+4. For each of the 5 selected hairstyles, write a personalized and uplifting explanation for why it's a good choice.
+5. Format your entire response as a single JSON object.
 
-Analyze the user's data and compare it against the attributes of each available hairstyle. Consider all factors, especially `skin_tone`, `face_shape`, and how the hairstyle's `tags` and `description` align with the user's `hairGoals` and `style` preferences. For each of the top 5 hairstyles, provide a unique, positive, and personalized explanation. Compliment their features (e.g., "This style beautifully complements your [face_shape] face shape...") and explain why the style is a great fit in a way that is logical and easy for the user to understand.
+**OUTPUT FORMAT RULES (FOLLOW EXACTLY):**
+- The entire output must be a single JSON object.
+- The JSON object must have one key: "recommendations".
+- The value of "recommendations" must be a JSON array.
+- The JSON array must contain exactly 5 elements.
+- Each element in the array must be a JSON object with two keys:
+1. "id": The integer ID of the hairstyle.
+2. "explanation": A string containing your personalized explanation.
 
-Adhere strictly to the following JSON format for your response:
-{"recommendations": [{"id": 3, "explanation": "Your explanation for hairstyle 3..."}, {"id": 1, "explanation": "Your explanation for hairstyle 1..."}, ... (5 total items)]}
+**EXAMPLE OF THE REQUIRED OUTPUT FORMAT:**
+```json
+{
+"recommendations": [
+{
+"id": 12,
+"explanation": "This style is a great choice because it complements your face shape and matches your preference for a professional look."
+},
+{
+"id": 5,
+"explanation": "The texture of this cut will work well with your hair type, and it's a stylish option that highlights your features."
+},
+// ... 3 more objects
+]
+}
+```
+
+Now, generate the response based on the provided inputs and the strict output format rules. Do not include any other text, notes, or apologies in your response. Only the JSON object is allowed.
 """
 
 
@@ -245,7 +266,7 @@ async def get_recommendations(request: RecommendationRequest):
 
         # 6. Call the AI model for recommendations
         completion = openai_client.chat.completions.create(
-            model="gpt-4o", 
+            model="gpt-4o-mini", 
             messages=[
                 {"role": "system", "content": "You are an expert AI stylist."},
                 {"role": "user", "content": prompt}
