@@ -33,9 +33,11 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
   bool _isAnalyzing = false;
   final Set<int> _likedStyles = {};
   QuizData? _quizData;
+  int? _selectedHairstyleId;
 
   // Supabase integration
   List<HairstyleData> _hairstyles = [];
+  Map<int, String> _explanations = {};
   bool _hairstylesLoading = false;
   String? _hairstylesError;
 
@@ -183,10 +185,21 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
           "Please complete the hair quiz before getting recommendations.",
         );
       }
-      final rankedIds = await AnalysisService.getRecommendations(
+      final recommendations = await AnalysisService.getRecommendations(
         analysisResult: _analysisResult!,
         quizData: _quizData!.toJson(),
       );
+
+      if (kDebugMode) {
+        // Print the raw data to see what we're getting from the backend
+        print(
+          'DEBUG: Recommendations received: ${recommendations.map((r) => {'id': r.id, 'explanation': r.explanation}).toList()}',
+        );
+      }
+
+      // Extract ranked IDs and explanations
+      final rankedIds = recommendations.map((r) => r.id).toList();
+      _explanations = {for (var r in recommendations) r.id: r.explanation};
 
       // 4. Save the session to Supabase (optional, could be done in parallel)
       await StorageService.saveUploadSession(
@@ -201,7 +214,7 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
       });
 
       // 5. Fetch the recommended hairstyles in the correct order
-      _fetchHairstyles(rankedIds: rankedIds);
+      await _fetchHairstyles(rankedIds: rankedIds);
     } catch (e) {
       setState(() {
         _isAnalyzing = false;
@@ -738,175 +751,215 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
         ),
         const SizedBox(height: 8),
         SizedBox(
-          height: 450, // Final height to prevent overflow
+          height: 360, // Increased height for larger cards
           child: _hairstylesLoading
               ? const Center(
                   child: CircularProgressIndicator(color: Color(0xFF8B5CF6)),
                 )
-              : _hairstylesError != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.error_outline, color: Colors.red, size: 48),
-                      const SizedBox(height: 16),
-                      Text(
-                        _hairstylesError!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _fetchHairstyles,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF8B5CF6),
-                        ),
-                        child: const Text(
-                          'Try Again',
-                          style: TextStyle(color: Colors.white),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
               : ListView.builder(
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                  ), // Consistent padding for first and last items
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: _hairstyles.length,
                   itemBuilder: (context, index) {
-                    return Container(
-                      width: 260,
-                      margin: EdgeInsets.only(
-                        right: index == _hairstyles.length - 1 ? 0 : 16,
+                    final hairstyle = _hairstyles[index];
+                    final isSelected = _selectedHairstyleId == hairstyle.id;
+                    // Determine if any card is selected to apply dimming
+                    final isAnyCardSelected = _selectedHairstyleId != null;
+
+                    return AnimatedOpacity(
+                      duration: const Duration(milliseconds: 300),
+                      opacity: isAnyCardSelected && !isSelected ? 0.5 : 1.0,
+                      child: Container(
+                        width: 260, // Reverted to a skinnier width
+                        margin: EdgeInsets.only(
+                          right: index == _hairstyles.length - 1 ? 0 : 16,
+                        ),
+                        child: _buildHairstyleCard(hairstyle, isSelected),
                       ),
-                      child: _buildHairstyleCard(_hairstyles[index], index),
                     );
                   },
                 ),
         ),
-        const SizedBox(height: 32), // Add bottom spacing
+        const SizedBox(height: 24),
+        // Explanation section
+        _buildExplanationSection(),
       ],
     );
   }
 
-  Widget _buildHairstyleCard(HairstyleData hairstyle, int index) {
-    final isLiked = _likedStyles.contains(index);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF2D2D2D),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isLiked ? const Color(0xFF10B981) : const Color(0xFF374151),
-          width: 2,
+  Widget _buildHairstyleCard(HairstyleData hairstyle, bool isSelected) {
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          if (_selectedHairstyleId == hairstyle.id) {
+            _selectedHairstyleId = null; // Deselect if tapped again
+          } else {
+            _selectedHairstyleId = hairstyle.id; // Select new card
+          }
+        });
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF2D2D2D),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected
+                ? const Color(0xFF8B5CF6)
+                : const Color(0xFF374151),
+            width: 2,
+          ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Hairstyle image - Make clickable to open gallery
-          Expanded(
-            flex: 5, // Slightly reduce image height to give content more space
-            child: GestureDetector(
-              onTap: () => _showHairstyleOverlay(hairstyle, index),
-              child: SizedBox(
-                width: double.infinity,
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(14),
-                    topRight: Radius.circular(14),
-                  ),
-                  child: CachedNetworkImage(
-                    imageUrl: hairstyle.imageUrl,
-                    fit: BoxFit.cover, // Keep cover to fill the container
-                    placeholder: (context, url) => Container(
-                      color: Colors.grey[700],
-                      child: const Center(
-                        child: CircularProgressIndicator(
-                          color: Color(0xFF8B5CF6),
-                        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Hairstyle image with overlay functionality
+            Expanded(flex: 5, child: _buildCardImage(hairstyle)),
+            // Content section
+            Expanded(
+              flex: 2,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      hairstyle.name,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    errorWidget: (context, url, error) => Container(
-                      color: Colors.grey[700],
-                      child: const Center(
-                        child: Icon(
-                          Icons.image_not_supported,
-                          color: Colors.white54,
-                          size: 40,
-                        ),
+                    const SizedBox(height: 6),
+                    Text(
+                      hairstyle.description,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withAlpha(170),
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExplanationSection() {
+    final explanation = _selectedHairstyleId != null
+        ? _explanations[_selectedHairstyleId]
+        : null;
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 400),
+      transitionBuilder: (child, animation) {
+        return FadeTransition(
+          opacity: animation,
+          child: SizeTransition(
+            sizeFactor: animation,
+            axis: Axis.vertical,
+            child: child,
           ),
-          // Content section
-          Expanded(
-            flex: 2, // Increase content area to avoid overflow
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 6,
-              ), // Compact padding
+        );
+      },
+      child: explanation != null
+          ? Container(
+              key: ValueKey<int>(_selectedHairstyleId!),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1F2937),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF8B5CF6)),
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    hairstyle.name,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white,
+                    "Why This Style Works For You",
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: const Color(0xFF8B5CF6),
                       fontWeight: FontWeight.bold,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 12),
                   Text(
-                    hairstyle.description,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.white.withAlpha(170),
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  // "I like this style" button
-                  ElevatedButton.icon(
-                    onPressed: () => _toggleLike(index, hairstyle),
-                    icon: Icon(
-                      isLiked ? Icons.favorite : Icons.favorite_border,
-                      color: isLiked
-                          ? const Color(0xFFEC4899)
-                          : Colors.white70, // Pink when liked
-                      size: 18,
-                    ),
-                    label: const Text('I like this style'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isLiked
-                          ? const Color(0xFF10B981)
-                          : const Color(0xFF374151), // Green when liked
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size(
-                        double.infinity,
-                        44,
-                      ), // Full width button
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                    explanation,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Colors.white,
+                      height: 1.5,
                     ),
                   ),
                 ],
               ),
+            )
+          : const SizedBox.shrink(key: ValueKey<String>('empty')),
+    );
+  }
+
+  Widget _buildCardImage(HairstyleData hairstyle) {
+    return FutureBuilder<String>(
+      future: SupabaseService.getHairstyleCardImageUrl(
+        hairstyleId: hairstyle.id!,
+        skinTone: _analysisResult?['skin_tone'] ?? 'light',
+        assumedRace: _analysisResult?['assumed_race'],
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return SizedBox(
+            height: 150,
+            width: double.infinity,
+            child: Center(
+              child: CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+            ),
+          );
+        }
+        if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
+          return _buildImagePlaceholder(); // Fallback to a generic placeholder
+        }
+
+        final imageUrl = snapshot.data!;
+        return ClipRRect(
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(14),
+            topRight: Radius.circular(14),
+          ),
+          child: Container(
+            color: Colors.black, // Background for letterboxing
+            child: CachedNetworkImage(
+              imageUrl: imageUrl,
+              width: double.infinity,
+              fit: BoxFit.contain, // Show the whole image
+              placeholder: (context, url) => _buildImagePlaceholder(),
+              errorWidget: (context, url, error) => _buildImageError(),
             ),
           ),
-        ],
+        );
+      },
+    );
+  }
+
+  Widget _buildImagePlaceholder() {
+    return Container(
+      height: 150,
+      color: Colors.grey[800],
+      child: const Center(
+        child: CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+      ),
+    );
+  }
+
+  Widget _buildImageError() {
+    return Container(
+      height: 150,
+      color: Colors.grey[800],
+      child: const Center(
+        child: Icon(Icons.broken_image, color: Colors.white54, size: 40),
       ),
     );
   }
@@ -998,22 +1051,14 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
   }
 
   // Fetch hairstyles from Supabase
-  Future<void> _fetchHairstyles({
-    Map<String, dynamic>? analysisResult,
-    List<int>? rankedIds,
-  }) async {
-    if (_hairstyles.isNotEmpty && analysisResult == null) {
-      return; // Don't fetch if already loaded and not a new analysis
-    }
+  Future<void> _fetchHairstyles({List<int>? rankedIds}) async {
+    setState(() {
+      _hairstylesLoading = true;
+      _hairstylesError = null;
+    });
 
     try {
-      setState(() {
-        _hairstylesLoading = true;
-        _hairstylesError = null;
-      });
-
       final hairstyles = await SupabaseService.getHairstyles(
-        analysis: analysisResult,
         rankedIds: rankedIds,
       );
 
@@ -1021,6 +1066,8 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
       setState(() {
         _hairstyles = hairstyles;
         _hairstylesLoading = false;
+        // Reset selection when new hairstyles are loaded
+        _selectedHairstyleId = null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -1033,355 +1080,5 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
         print('Error fetching hairstyles: $e');
       }
     }
-  }
-
-  void _showHairstyleOverlay(HairstyleData hairstyle, int cardIndex) async {
-    // Fetch images from Supabase database for all hairstyles
-    final images = await SupabaseService.getHairstyleImages(
-      hairstyle.id!,
-      skinTone:
-          null, // Don't filter by skin tone - get all images for this hairstyle
-    );
-
-    if (!mounted) return;
-
-    // ignore: use_build_context_synchronously
-    if (context.mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: true,
-        barrierColor: Colors.black54,
-        builder: (context) => _HairstyleOverlayModal(
-          hairstyle: hairstyle,
-          images: images,
-          isLiked: _likedStyles.contains(cardIndex),
-          onLikeToggle: () => _toggleLike(cardIndex, hairstyle),
-        ),
-      );
-    }
-  }
-}
-
-class _HairstyleOverlayModal extends StatefulWidget {
-  final HairstyleData hairstyle;
-  final List<HairstyleImage> images;
-  final bool isLiked;
-  final VoidCallback onLikeToggle;
-
-  const _HairstyleOverlayModal({
-    required this.hairstyle,
-    required this.images,
-    required this.isLiked,
-    required this.onLikeToggle,
-  });
-
-  @override
-  State<_HairstyleOverlayModal> createState() => _HairstyleOverlayModalState();
-}
-
-class _HairstyleOverlayModalState extends State<_HairstyleOverlayModal> {
-  late PageController _pageController;
-  int _currentIndex = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _pageController = PageController();
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  void _previousImage() {
-    if (_currentIndex > 0) {
-      _pageController.previousPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
-    }
-  }
-
-  void _nextImage() {
-    if (_currentIndex < widget.images.length - 1) {
-      _pageController.nextPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
-    final modalWidth = screenSize.width * 0.9; // Increased to 90% width
-    final modalHeight = screenSize.height * 0.85; // Increased to 85% height
-
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      child: Container(
-        width: modalWidth,
-        height: modalHeight,
-        decoration: BoxDecoration(
-          color: Colors.black87,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: SingleChildScrollView(
-          // Wrap everything in SingleChildScrollView
-          child: SizedBox(
-            height: modalHeight,
-            child: Column(
-              children: [
-                // Top controls
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // Close button (X)
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(
-                          Icons.close,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                      ),
-                      // Heart button
-                      IconButton(
-                        onPressed: () {
-                          widget.onLikeToggle();
-                          setState(() {}); // Trigger rebuild to update heart
-                        },
-                        icon: Icon(
-                          widget.isLiked
-                              ? Icons.favorite
-                              : Icons.favorite_border,
-                          color: widget.isLiked
-                              ? const Color(0xFFEC4899)
-                              : Colors.white.withAlpha(170),
-                          size: 24,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Image gallery - use more space
-                Expanded(
-                  flex: 3, // Give more space to the image gallery
-                  child: widget.images.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'No images available',
-                            style: TextStyle(color: Colors.white, fontSize: 16),
-                          ),
-                        )
-                      : Stack(
-                          children: [
-                            // PageView for horizontal scrolling
-                            PageView.builder(
-                              controller: _pageController,
-                              onPageChanged: (index) {
-                                setState(() {
-                                  _currentIndex = index;
-                                });
-                              },
-                              itemCount: widget.images.length,
-                              itemBuilder: (context, index) {
-                                final imageUrl = widget
-                                    .images[index]
-                                    .imageUrl; // Use URL as-is, no normalization
-
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 24,
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Image.network(
-                                      // Use Image.network instead of CachedNetworkImage
-                                      imageUrl,
-                                      fit: BoxFit.contain,
-                                      loadingBuilder: (context, child, loadingProgress) {
-                                        if (loadingProgress == null)
-                                          return child;
-                                        return Container(
-                                          color: Colors.grey[800],
-                                          child: Center(
-                                            child: CircularProgressIndicator(
-                                              color: const Color(0xFF8B5CF6),
-                                              value:
-                                                  loadingProgress
-                                                          .expectedTotalBytes !=
-                                                      null
-                                                  ? loadingProgress
-                                                            .cumulativeBytesLoaded /
-                                                        loadingProgress
-                                                            .expectedTotalBytes!
-                                                  : null,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                      errorBuilder:
-                                          (
-                                            context,
-                                            error,
-                                            stackTrace,
-                                          ) => Container(
-                                            color: Colors.grey[800],
-                                            child: Column(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: [
-                                                const Icon(
-                                                  Icons.image_not_supported,
-                                                  color: Colors.white54,
-                                                  size: 60,
-                                                ),
-                                                const SizedBox(height: 8),
-                                                Text(
-                                                  'Failed to load image ${index + 1}',
-                                                  style: const TextStyle(
-                                                    color: Colors.white54,
-                                                  ),
-                                                  textAlign: TextAlign.center,
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-
-                            // Left arrow
-                            if (widget.images.length > 1 && _currentIndex > 0)
-                              Positioned(
-                                left: 8,
-                                top: 0,
-                                bottom: 0,
-                                child: Center(
-                                  child: IconButton(
-                                    onPressed: _previousImage,
-                                    icon: const Icon(
-                                      Icons.arrow_back_ios,
-                                      color: Colors.white,
-                                      size: 32,
-                                    ),
-                                    style: IconButton.styleFrom(
-                                      backgroundColor: Colors.black54,
-                                      shape: const CircleBorder(),
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                            // Right arrow
-                            if (widget.images.length > 1 &&
-                                _currentIndex < widget.images.length - 1)
-                              Positioned(
-                                right: 8,
-                                top: 0,
-                                bottom: 0,
-                                child: Center(
-                                  child: IconButton(
-                                    onPressed: _nextImage,
-                                    icon: const Icon(
-                                      Icons.arrow_forward_ios,
-                                      color: Colors.white,
-                                      size: 32,
-                                    ),
-                                    style: IconButton.styleFrom(
-                                      backgroundColor: Colors.black54,
-                                      shape: const CircleBorder(),
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                            // Navigation dots
-                            if (widget.images.length > 1)
-                              Positioned(
-                                bottom: 16,
-                                left: 0,
-                                right: 0,
-                                child: Center(
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: List.generate(
-                                      widget.images.length,
-                                      (index) => Container(
-                                        width: 8,
-                                        height: 8,
-                                        margin: const EdgeInsets.symmetric(
-                                          horizontal: 4,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: index == _currentIndex
-                                              ? Colors.white
-                                              : Colors.white.withAlpha(102),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                ),
-
-                // Hairstyle info at bottom - use less space
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20), // Reduced padding
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min, // Important: minimize space
-                    children: [
-                      Text(
-                        widget.hairstyle.name,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22, // Slightly smaller
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 6), // Reduced spacing
-                      Text(
-                        widget.hairstyle.description,
-                        style: TextStyle(
-                          color: Colors.white.withAlpha(204),
-                          fontSize: 14, // Slightly smaller
-                          height: 1.3, // Reduced line height
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 3, // Limit lines to prevent overflow
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'This is a demo showing how results would look.',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.white.withAlpha(178),
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }

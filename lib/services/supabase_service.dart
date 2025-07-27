@@ -324,6 +324,81 @@ class SupabaseService {
     });
   }
 
+  // New function to get a specific card image for a hairstyle
+  static Future<String> getHairstyleCardImageUrl({
+    required int hairstyleId,
+    required String skinTone,
+    String? assumedRace, // e.g., 'asian', 'black', etc.
+  }) async {
+    return await _executeWithRetry(() async {
+      if (kDebugMode) {
+        print(
+          'DEBUG: Fetching card image for hairstyle $hairstyleId with skin tone "$skinTone" and race "$assumedRace"',
+        );
+      }
+
+      // 1. Prioritize 'front' view with the exact skin tone.
+      // If assumedRace is 'asian', we use that as the skin_tone for lookup.
+      final lookupSkinTone = (assumedRace == 'asian') ? 'asian' : skinTone;
+
+      var query = _client
+          .from('hairstyle_images')
+          .select('image_url')
+          .eq('hairstyle_id', hairstyleId)
+          .eq('view_type', 'front')
+          .eq('skin_tone', lookupSkinTone)
+          .limit(1);
+
+      final response = await query;
+
+      if (response.isNotEmpty && response[0]['image_url'] != null) {
+        final imageUrl = response[0]['image_url'];
+        if (kDebugMode) {
+          print('DEBUG: Found exact match for card image: $imageUrl');
+        }
+        return imageUrl;
+      }
+
+      // 2. Fallback: If no exact match, find any 'front' view for a different skin tone.
+      if (kDebugMode) {
+        print(
+          'DEBUG: No exact match found. Falling back to any "front" view image for hairstyle $hairstyleId.',
+        );
+      }
+      final fallbackQuery = _client
+          .from('hairstyle_images')
+          .select('image_url')
+          .eq('hairstyle_id', hairstyleId)
+          .eq('view_type', 'front')
+          .limit(1);
+
+      final fallbackResponse = await fallbackQuery;
+
+      if (fallbackResponse.isNotEmpty &&
+          fallbackResponse[0]['image_url'] != null) {
+        final imageUrl = fallbackResponse[0]['image_url'];
+        if (kDebugMode) {
+          print('DEBUG: Found fallback "front" view image: $imageUrl');
+        }
+        return imageUrl;
+      }
+
+      // 3. Final Fallback: If no 'front' view exists at all, get the main hairstyle image.
+      if (kDebugMode) {
+        print(
+          'DEBUG: No "front" view found. Falling back to main hairstyle image_url.',
+        );
+      }
+      final mainHairstyleResponse = await _client
+          .from('hairstyles')
+          .select('image_url')
+          .eq('id', hairstyleId)
+          .single();
+
+      return mainHairstyleResponse['image_url'] ?? '';
+    });
+  }
+
   // Check if the service is properly initialized
   static bool get isInitialized => _isInitialized;
 
@@ -372,22 +447,50 @@ class HairstyleData {
     this.proTips = const [],
   });
 
-  static List<String>? _parseJsonStringToList(String? jsonString) {
-    if (jsonString == null || jsonString.isEmpty) return null;
-    try {
-      // Replace single quotes with double quotes to make it valid JSON
-      final validJsonString = jsonString.replaceAll("'", '"');
-      final decoded = jsonDecode(validJsonString);
-      if (decoded is List) {
-        return decoded.map((item) => item.toString()).toList();
-      }
-      return null;
-    } catch (e) {
-      if (kDebugMode) {
-        print('Failed to parse JSON string "$jsonString": $e');
-      }
-      return null;
+  static List<String>? _parseFlexibleStringToList(dynamic data) {
+    if (data == null) return null;
+
+    if (data is List) {
+      return data.map((item) => item.toString()).toList();
     }
+
+    if (data is String) {
+      if (data.trim().isEmpty) {
+        return [];
+      }
+
+      final String trimmedData = data.trim();
+
+      // Try parsing as JSON array
+      try {
+        // A simple check for JSON array format
+        if (trimmedData.startsWith('[') && trimmedData.endsWith(']')) {
+          final decoded = jsonDecode(trimmedData);
+          if (decoded is List) {
+            return decoded.map((item) => item.toString()).toList();
+          }
+        }
+      } catch (e) {
+        // Not a valid JSON array, fall through to delimiter splitting
+        if (kDebugMode) {
+          print(
+            'DEBUG: Could not parse "$trimmedData" as JSON, will try splitting. Error: $e',
+          );
+        }
+      }
+
+      // If not a JSON array, or if parsing fails, split by delimiter.
+      // Handles both comma and semicolon.
+      final separator = trimmedData.contains(';') ? ';' : ',';
+      return trimmedData
+          .split(separator)
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+    }
+
+    // Return an empty list for any other unhandled type to prevent errors
+    return [];
   }
 
   // Create HairstyleData from Supabase response
@@ -406,17 +509,14 @@ class HairstyleData {
       imageUrl: imageUrl,
       stylingTimeMinutes: data['styling_time_minutes'] ?? 0,
       difficultyLevel: data['difficulty_level'],
-      hairTexture: (data['hair_texture'] as String?)
-          ?.split(',')
-          .map((e) => e.trim())
-          .toList(),
-      faceShape: _parseJsonStringToList(data['face_shape']),
+      hairTexture: _parseFlexibleStringToList(data['hair_texture']),
+      faceShape: _parseFlexibleStringToList(data['face_shape']),
       hairLength: data['hair_length'],
       createdAt: data['created_at'] != null
           ? DateTime.parse(data['created_at'])
           : null,
-      skinTones: _parseJsonStringToList(data['skin_tones']),
-      tags: _parseJsonStringToList(data['tags']),
+      skinTones: _parseFlexibleStringToList(data['skin_tones']),
+      tags: _parseFlexibleStringToList(data['tags']),
       // For now, keep empty lists for backward compatibility
       steps: [],
       products: [],

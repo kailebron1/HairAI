@@ -49,6 +49,7 @@ class ImageAnalysisResult(BaseModel):
     skin_tone: Literal["light", "olive", "dark", "asian"]
     hair_color: Literal["blonde", "brown", "black", "grey", "red"]
     hair_length: Literal["short", "medium", "long"]
+    assumed_race: Literal["asian", "black", "caucasian", "hispanic", "other"]
     raw_analysis_data: Dict[str, Any]
 
 class QuizData(BaseModel):
@@ -103,7 +104,8 @@ You MUST respond with a valid JSON object that strictly adheres to the following
   "face_shape": "one of 'oval', 'round', 'square', 'heart', 'diamond'",
   "skin_tone": "one of 'light', 'olive', 'dark', 'asian'",
   "hair_color": "one of 'blonde', 'brown', 'black', 'grey', 'red'",
-  "hair_length": "one of 'short', 'medium', 'long'"
+  "hair_length": "one of 'short', 'medium', 'long'",
+  "assumed_race": "one of 'asian', 'black', 'caucasian', 'hispanic', 'other'"
 }
 - Analyze the most prominent person in the image.
 - If an attribute is unclear, make your best professional assessment.
@@ -113,7 +115,14 @@ You MUST respond with a valid JSON object that strictly adheres to the following
 RECOMMENDATION_PROMPT_TEMPLATE = """
 You are an expert AI stylist. Your task is to provide personalized hairstyle recommendations based on a user's facial analysis and personal preferences from a quiz.
 
-You will be given the user's data and a list of available hairstyles. You MUST return a JSON array of the top 5 hairstyle IDs, ranked from best to worst fit.
+You will be given the user's data and a list of available hairstyles.
+Your response MUST be a single, valid JSON object.
+This JSON object MUST contain a single key named "recommendations".
+The value of "recommendations" MUST be a JSON array.
+This array MUST contain EXACTLY 5 hairstyle objects, ranked from best to worst.
+Each object in the array MUST have two keys: "id" (the integer ID of the hairstyle) and "explanation" (a string explaining the choice).
+
+**CRITICAL:** Do NOT return a simple list of IDs. Your response must be a JSON object with the "recommendations" key, containing a list of objects, each with an "id" and an "explanation". Failure to follow this format will result in an error.
 
 **User Data:**
 - Image Analysis: {analysis_result}
@@ -122,9 +131,10 @@ You will be given the user's data and a list of available hairstyles. You MUST r
 **Available Hairstyles (JSON format):**
 {hairstyles}
 
-Analyze the user's data and compare it against the attributes of each available hairstyle. Consider all factors, especially `skin_tone`, `face_shape`, and how the hairstyle's `tags` and `description` align with the user's `hairGoals` and `style` preferences.
+Analyze the user's data and compare it against the attributes of each available hairstyle. Consider all factors, especially `skin_tone`, `face_shape`, and how the hairstyle's `tags` and `description` align with the user's `hairGoals` and `style` preferences. For each of the top 5 hairstyles, provide a unique, positive, and personalized explanation. Compliment their features (e.g., "This style beautifully complements your [face_shape] face shape...") and explain why the style is a great fit in a way that is logical and easy for the user to understand.
 
-Return ONLY a JSON array of the top 5 integer IDs for the best-fitting hairstyles. For example: [3, 1, 8, 5, 2]
+Adhere strictly to the following JSON format for your response:
+{"recommendations": [{"id": 3, "explanation": "Your explanation for hairstyle 3..."}, {"id": 1, "explanation": "Your explanation for hairstyle 1..."}, ... (5 total items)]}
 """
 
 
@@ -172,6 +182,7 @@ async def analyze_image(request: ImageAnalysisRequest):
             skin_tone=analysis_data.get("skin_tone"),
             hair_color=analysis_data.get("hair_color"),
             hair_length=analysis_data.get("hair_length"),
+            assumed_race=analysis_data.get("assumed_race"),
             raw_analysis_data=analysis_data
         )
         return validated_data
@@ -181,11 +192,15 @@ async def analyze_image(request: ImageAnalysisRequest):
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
-@app.post("/recommend", response_model=List[int])
+class RecommendationResponse(BaseModel):
+    id: int
+    explanation: str
+
+@app.post("/recommend", response_model=List[RecommendationResponse])
 async def get_recommendations(request: RecommendationRequest):
     """
-    Accepts user analysis and quiz data, fetches all hairstyles,
-    and uses OpenAI to rank them, returning an ordered list of hairstyle IDs.
+    Accepts user analysis and quiz data, fetches and filters hairstyles,
+    and uses OpenAI to rank them, returning an ordered list of hairstyle IDs with explanations.
     """
     try:
         # 1. Fetch all hairstyles from Supabase
@@ -194,15 +209,24 @@ async def get_recommendations(request: RecommendationRequest):
         if not hairstyles_data:
             raise HTTPException(status_code=404, detail="No hairstyles found in the database.")
 
-        # 2. Pre-process data to handle stringified JSON fields from Supabase
+        # 2. Pre-process data and filter based on skin tone
+        user_skin_tone = request.analysis_result.skin_tone
         processed_hairstyles = []
         for h in hairstyles_data:
             h_copy = h.copy()
+            # Parse string fields into lists
             h_copy['face_shape'] = parse_json_field(h.get('face_shape'))
             h_copy['skin_tones'] = parse_json_field(h.get('skin_tones'))
             h_copy['hair_texture'] = parse_json_field(h.get('hair_texture'))
             h_copy['tags'] = parse_json_field(h.get('tags'))
-            processed_hairstyles.append(h_copy)
+
+            # Filter hairstyles to only include those compatible with the user's skin tone
+            if user_skin_tone in h_copy['skin_tones']:
+                processed_hairstyles.append(h_copy)
+
+        # If no hairstyles match the skin tone, we can't proceed.
+        if not processed_hairstyles:
+             raise HTTPException(status_code=404, detail=f"No hairstyles found matching the skin tone: {user_skin_tone}")
 
         # 3. Convert to list of Pydantic models for structured data and validation
         hairstyles = [Hairstyle(**h) for h in processed_hairstyles]
@@ -233,25 +257,20 @@ async def get_recommendations(request: RecommendationRequest):
         if not raw_response:
             raise HTTPException(status_code=500, detail="AI recommendation model returned an empty response.")
 
-        # The prompt asks for a JSON array, but the model might wrap it in a JSON object.
-        # We need to robustly parse the returned IDs.
+        # The prompt asks for a JSON object with a 'recommendations' key.
         try:
-            # First, assume the response is a JSON object like {"ranked_ids": [1, 2, 3]}
-            ranked_ids = json.loads(raw_response)
-            if isinstance(ranked_ids, dict):
-                # Look for any key that contains a list of integers
-                for key, value in ranked_ids.items():
-                    if isinstance(value, list) and all(isinstance(i, int) for i in value):
-                        return value
-            
-            # If it's a direct list like [1, 2, 3]
-            if isinstance(ranked_ids, list) and all(isinstance(i, int) for i in ranked_ids):
-                return ranked_ids
+            response_data = json.loads(raw_response)
+            recommendations = response_data.get("recommendations")
 
-            raise ValueError("No valid list of integer IDs found in the AI response.")
+            if not recommendations or not isinstance(recommendations, list):
+                raise ValueError("AI response did not contain a valid 'recommendations' list.")
 
-        except (json.JSONDecodeError, ValueError) as e:
-            raise HTTPException(status_code=500, detail=f"Failed to parse AI recommendation response: {e}")
+            # Validate each item in the list with the Pydantic model
+            validated_recommendations = [RecommendationResponse(**item) for item in recommendations]
+            return validated_recommendations
+
+        except (json.JSONDecodeError, ValidationError) as e:
+            raise HTTPException(status_code=500, detail=f"Failed to parse or validate AI recommendation response: {e}")
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
