@@ -242,110 +242,91 @@ class RecommendationResponse(BaseModel):
 @app.post("/recommend", response_model=List[RecommendationResponse])
 async def get_recommendations(request: RecommendationRequest):
     """
-    Accepts user analysis and quiz data, fetches and filters hairstyles,
-    and uses OpenAI to rank them, returning an ordered list of hairstyle IDs with explanations.
+    Fetch hairstyles, pre-filter by skin-tone, then let GPT-4o (via function-calling) pick
+    the top 5 and write uplifting explanations. Function calling guarantees valid JSON.
     """
     try:
-        # 1. Fetch all hairstyles from Supabase
-        response = supabase.from_("hairstyles").select("*").execute()
-        hairstyles_data = response.data
-        if not hairstyles_data:
-            raise HTTPException(status_code=404, detail="No hairstyles found in the database.")
+        # 1. Fetch hairstyles
+        sb_resp = supabase.from_("hairstyles").select("*").execute()
+        all_styles = sb_resp.data or []
+        if not all_styles:
+            raise HTTPException(status_code=404, detail="No hairstyles found in database.")
 
-        # 2. Pre-process data and filter based on skin tone
-        user_skin_tone = request.analysis_result.skin_tone
-        processed_hairstyles = []
-        for h in hairstyles_data:
+        # 2. Pre-filter by user skin-tone (rule confirmed by user)
+        user_skin = request.analysis_result.skin_tone
+        filtered = []
+        for h in all_styles:
             h_copy = h.copy()
-            # Parse string fields into lists
-            h_copy['face_shape'] = parse_json_field(h.get('face_shape'))
-            h_copy['skin_tones'] = parse_json_field(h.get('skin_tones'))
-            h_copy['hair_texture'] = parse_json_field(h.get('hair_texture'))
-            h_copy['tags'] = parse_json_field(h.get('tags'))
+            h_copy["skin_tones"] = parse_json_field(h.get("skin_tones"))
+            h_copy["face_shape"] = parse_json_field(h.get("face_shape"))
+            h_copy["hair_texture"] = parse_json_field(h.get("hair_texture"))
+            h_copy["tags"] = parse_json_field(h.get("tags"))
+            if user_skin in h_copy["skin_tones"]:
+                filtered.append(h_copy)
 
-            # Filter hairstyles to only include those compatible with the user's skin tone
-            if user_skin_tone in h_copy['skin_tones']:
-                processed_hairstyles.append(h_copy)
+        if not filtered:
+            raise HTTPException(status_code=404, detail=f"No styles match skin tone '{user_skin}'.")
 
-        # If no hairstyles match the skin tone, we can't proceed.
-        if not processed_hairstyles:
-             raise HTTPException(status_code=404, detail=f"No hairstyles found matching the skin tone: {user_skin_tone}")
+        # 3. Build function schema for OpenAI
+        recommend_schema = {
+            "name": "recommend",
+            "description": "Return the top 5 hairstyle recommendations with explanations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recommendations": {
+                        "type": "array",
+                        "minItems": 5,
+                        "maxItems": 5,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "integer"},
+                                "explanation": {"type": "string"}
+                            },
+                            "required": ["id", "explanation"]
+                        }
+                    }
+                },
+                "required": ["recommendations"]
+            }
+        }
 
-        # 3. Convert to list of Pydantic models for structured data and validation
-        hairstyles = [Hairstyle(**h) for h in processed_hairstyles]
+        # 4. Craft messages – keep concise to reduce token usage
+        system_msg = "You are an expert AI stylist. Use the provided function to return exactly five recommendations."
+        user_payload = {
+            "analysis": request.analysis_result.dict(),
+            "quiz": request.quiz_data,
+            "hairstyles": filtered  # send pre-filtered list
+        }
 
-        # 4. Prepare data for OpenAI prompt
-        # Convert Pydantic models to a list of dictionaries for JSON serialization
-        hairstyles_json = [h.model_dump() for h in hairstyles]
-        hairstyles_json_str = json.dumps(hairstyles_json, indent=2)
-
-        # 5. Create the prompt for OpenAI
-        prompt = RECOMMENDATION_PROMPT_TEMPLATE.format(
-            analysis_result=request.analysis_result.dict(),
-            quiz_data=request.quiz_data,
-            hairstyles=hairstyles_json_str
-        )
-
-        # 6. Call the AI model for recommendations
         completion = openai_client.chat.completions.create(
-            model="gpt-4o-mini", 
+            model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are an expert AI stylist."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": json.dumps(user_payload)}
             ],
-            response_format={"type": "json_object"},
+            functions=[recommend_schema],
+            function_call={"name": "recommend"}
         )
-        
-        raw_response = completion.choices[0].message.content or ""
-        if not raw_response:
-            raise HTTPException(status_code=500, detail="AI recommendation model returned an empty response.")
 
-        # DEBUG: Print raw AI response for diagnostics
-        print("DEBUG: Raw AI response from OpenAI:\n" + raw_response)
+        fc = completion.choices[0].message.function_call
+        if not fc or not fc.arguments:
+            raise HTTPException(status_code=500, detail="OpenAI returned no function arguments.")
 
-        # Clean up the response: remove leading/trailing whitespace and optional ```json fencing
-        clean_response = raw_response.strip()
-        if clean_response.startswith("```"):
-            # remove the first ``` line and the last ``` if present
-            clean_response = clean_response.lstrip("` ").lstrip("json").strip()
-            if clean_response.endswith("```"):
-                clean_response = clean_response[: -3].strip()
+        args = json.loads(fc.arguments)
+        recs = args.get("recommendations", [])
 
-        # The prompt asks for a JSON object with a 'recommendations' key.
-        try:
-            response_data = _normalize_keys(json.loads(clean_response))
-            
-            # Defensive check: ensure response_data is a dictionary
-            if not isinstance(response_data, dict):
-                raise ValueError(f"AI response was not a JSON object (dictionary). Got: {type(response_data)}")
+        # Validate and convert to Pydantic list
+        validated = [RecommendationResponse(**rec) for rec in recs]
+        return validated
 
-            # Find the key that matches "recommendations" ignoring whitespace/case
-            recommendations = None
-            for key, value in response_data.items():
-                if key.strip().lower() == "recommendations":
-                    recommendations = value
-                    break
-
-            if recommendations is None or not isinstance(recommendations, list):
-                raise ValueError("AI response did not contain a valid 'recommendations' list.")
-
-            # Normalise keys inside each recommendation dict, then validate
-            validated_recommendations = [
-                RecommendationResponse(**_normalize_keys(item))
-                for item in recommendations
-            ]
-            return validated_recommendations
-
-        except (json.JSONDecodeError, ValidationError, ValueError) as e:
-            # Log the problematic response for debugging
-            print(f"ERROR: Failed to parse or validate AI response. Error: {e}")
-            print(f"ERROR: Raw AI response was: {raw_response}")
-            raise HTTPException(status_code=500, detail=f"Failed to process AI recommendation response: {e}")
-
+    except (ValidationError, ValueError, json.JSONDecodeError) as e:
+        print(f"ERROR: Failed to process AI response: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process AI response: {e}")
     except Exception as e:
-        # Log unexpected errors for debugging
-        print(f"FATAL: An unexpected error occurred in /recommend: {e}")
-        raise HTTPException(status_code=500, detail=f"An unexpected server error occurred: {e}")
+        print(f"FATAL: Unhandled error in /recommend: {e}")
+        raise HTTPException(status_code=500, detail=f"Unexpected server error: {e}")
 
 
 @app.get("/")
