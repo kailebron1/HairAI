@@ -304,9 +304,14 @@ async def get_recommendations(request: RecommendationRequest):
             if not isinstance(response_data, dict):
                 raise ValueError(f"AI response was not a JSON object (dictionary). Got: {type(response_data)}")
 
-            recommendations = response_data.get("recommendations")
+            # Find the key that matches "recommendations" ignoring whitespace/case
+            recommendations = None
+            for key, value in response_data.items():
+                if key.strip().lower() == "recommendations":
+                    recommendations = value
+                    break
 
-            if not recommendations or not isinstance(recommendations, list):
+            if recommendations is None or not isinstance(recommendations, list):
                 raise ValueError("AI response did not contain a valid 'recommendations' list.")
 
             # Validate each item in the list with the Pydantic model
