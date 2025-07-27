@@ -326,8 +326,11 @@ async def get_recommendations(request: RecommendationRequest):
             if recommendations is None or not isinstance(recommendations, list):
                 raise ValueError("AI response did not contain a valid 'recommendations' list.")
 
-            # Validate each item in the list with the Pydantic model
-            validated_recommendations = [RecommendationResponse(**item) for item in recommendations]
+            # Normalise keys inside each recommendation dict, then validate
+            validated_recommendations = [
+                RecommendationResponse(**_normalize_keys(item))
+                for item in recommendations
+            ]
             return validated_recommendations
 
         except (json.JSONDecodeError, ValidationError, ValueError) as e:
