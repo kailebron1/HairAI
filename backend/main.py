@@ -108,66 +108,75 @@ app.add_middleware(
 
 
 # --- System Prompts for OpenAI ---
-IMAGE_ANALYSIS_PROMPT = """
-You are an expert AI assistant specializing in analyzing human faces from images for hairstyle recommendations.
-Your task is to analyze the user-provided image and determine the following attributes.
-You MUST respond with a valid JSON object that strictly adheres to the following structure and available options:
-{
-  "face_shape": "one of 'oval', 'round', 'square', 'heart', 'diamond'",
-  "skin_tone": "one of 'light', 'olive', 'dark', 'asian'",
-  "hair_color": "one of 'blonde', 'brown', 'black', 'grey', 'red'",
-  "hair_length": "one of 'short', 'medium', 'long'",
-  "assumed_race": "one of 'asian', 'black', 'caucasian', 'hispanic', 'other'"
-}
-- Analyze the most prominent person in the image.
-- If an attribute is unclear, make your best professional assessment.
-- Do not include any additional text, explanations, or apologies in your response. Only the JSON object.
-"""
+IMAGE_ANALYSIS_PROMPT = """You are an expert AI assistant specializing in analyzing human facial attributes from images to recommend hairstyles.
 
-RECOMMENDATION_PROMPT_TEMPLATE = """
-You are an expert AI stylist. Your task is to provide personalized hairstyle recommendations based on a user's facial analysis and personal preferences from a quiz.
+Analyze the most prominent face in the image and determine the following attributes.  
+You MUST respond with a valid JSON object using ONLY one of the exact values provided for each attribute.
+
+{
+  "best_face_shape_match": "one of: 'oval', 'round', 'square', 'heart', 'diamond'",
+  "second_best_face_shape_match": "one of: 'oval', 'round', 'square', 'heart', 'diamond'",
+  "skin_tone": "one of: 'light', 'olive', 'dark', 'asian'",
+  "hair_color": "one of: 'blonde', 'brown', 'black', 'grey', 'red'",
+  "hair_length": "one of: 'short', 'medium', 'long'",
+  "assumed_race": "one of: 'asian', 'black', 'caucasian', 'hispanic', 'other'"
+}
+
+Use the following criteria when determining face shape:
+
+- **Oval**: Face is longer than it is wide. Jawline and forehead are rounded and similar in width. Cheekbones are slightly prominent.
+- **Round**: Face is about as wide as it is long. Cheeks are full. Jawline is soft and curved with minimal angles.
+- **Square**: Jawline is strong and angular. Forehead, cheekbones, and jaw are roughly the same width.
+- **Heart**: Forehead is noticeably wider than the jaw. Chin is narrow or pointed. The face may resemble an upside-down triangle.
+- **Diamond**: Cheekbones are the widest part of the face. Forehead and jaw are narrow. Chin is pointed.
+
+Make your best expert assessment based on facial proportions, jawline shape, forehead width, cheekbone width, and overall silhouette.
+
+Respond with ONLY the JSON object. Do NOT include any explanations, descriptions, or extra text."""
+
+
+RECOMMENDATION_PROMPT_TEMPLATE = """You are an expert AI stylist.
+
+Your task is to provide personalized hairstyle recommendations based on the user's facial features and quiz preferences.
 
 **INPUTS:**
 1. **User Data:**
-- Image Analysis: {analysis_result}
-- Quiz Responses: {quiz_data}
+   - Facial Analysis (from image): {analysis_result}
+   - Quiz Responses: {quiz_data}
 2. **Available Hairstyles:**
-- A JSON list of hairstyle objects: {hairstyles}
+   - A JSON array of hairstyle objects: {hairstyles}
 
 **TASK:**
-1. Analyze the user data.
-2. Compare the user data to the attributes of each hairstyle in the provided list.
-3. Select the top 5 best-fitting hairstyles for the user, ranked from best to worst.
-4. For each of the 5 selected hairstyles, write a personalized and uplifting explanation for why it's a good choice.
-5. Format your entire response as a single JSON object.
+1. Carefully analyze the user’s face shape and skin tone — these are the **most important factors** when choosing hairstyles.  
+2. Then consider their hair color, hair length, hair type, and quiz preferences to refine the match.
+3. Compare all this data against the attributes of each hairstyle.
+4. Select the top 5 hairstyles that best match the user’s features and preferences, ranked from best to least suitable.
+5. For each of the 5, write a short, uplifting explanation explaining why it fits the user — especially highlighting how it suits their **face shape** and **skin tone**.
+6. Format your entire response as a **valid JSON object**, following the exact structure below.
 
-**OUTPUT FORMAT RULES (FOLLOW EXACTLY):**
-- The entire output must be a single JSON object.
-- The JSON object must have one key: "recommendations".
-- The value of "recommendations" must be a JSON array.
-- The JSON array must contain exactly 5 elements.
-- Each element in the array must be a JSON object with two keys:
-1. "id": The integer ID of the hairstyle.
-2. "explanation": A string containing your personalized explanation.
+**STRICT OUTPUT FORMAT (FOLLOW EXACTLY):**
+- Output must be a single JSON object.
+- The object must contain one key: `"recommendations"`.
+- The value of `"recommendations"` must be an array with **exactly 5 elements**.
+- Each element must be a JSON object with:
+  - `"id"`: (integer) the ID of the hairstyle from the input list.
+  - `"explanation"`: (string) a personalized reason why the style is a great fit, emphasizing face shape and skin tone.
 
-**EXAMPLE OF THE REQUIRED OUTPUT FORMAT:**
+**EXAMPLE:**
 ```json
 {
-"recommendations": [
-{
-"id": 12,
-"explanation": "This style is a great choice because it complements your face shape and matches your preference for a professional look."
-},
-{
-"id": 5,
-"explanation": "The texture of this cut will work well with your hair type, and it's a stylish option that highlights your features."
-},
-// ... 3 more objects
-]
+  "recommendations": [
+    {
+      "id": 12,
+      "explanation": "This style frames your square face shape perfectly and complements your warm olive skin tone for a bold, stylish look."
+    },
+    {
+      "id": 5,
+      "explanation": "Your round face benefits from the added height of this cut, while the tone harmonizes beautifully with your light complexion."
+    }
+    // ... 3 more
+  ]
 }
-```
-
-Now, generate the response based on the provided inputs and the strict output format rules. Do not include any other text, notes, or apologies in your response. Only the JSON object is allowed.
 """
 
 
