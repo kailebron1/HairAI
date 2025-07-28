@@ -33,7 +33,8 @@ dependencies:
   supabase_flutter: ^2.5.0
   image_picker: ^1.1.2
   path_provider: ^2.1.3
-  shared_preferences: ^2.2.3
+  shared_preferences: ^2.2.2
+  uuid: ^3.0.7
   cached_network_image: ^3.3.1
   file_picker: ^8.0.0+1
   aws_rekognition_api: ^2.0.0

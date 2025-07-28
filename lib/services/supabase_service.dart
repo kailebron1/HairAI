@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import 'dart:async';
 
 class SupabaseService {
@@ -8,6 +10,22 @@ class SupabaseService {
   static bool _isInitialized = false;
   static const int _maxRetries = 3;
   static const Duration _retryDelay = Duration(seconds: 2);
+  static String? _deviceId; // persistent UUID for dev favourites
+
+  // ---- Device ID helper ----
+  static const String _deviceIdKey = 'device_id';
+  static Future<void> _ensureDeviceId() async {
+    if (_deviceId != null) return;
+    final prefs = await SharedPreferences.getInstance();
+    _deviceId = prefs.getString(_deviceIdKey);
+    if (_deviceId == null) {
+      _deviceId = const Uuid().v4();
+      await prefs.setString(_deviceIdKey, _deviceId!);
+      if (kDebugMode) {
+        print('DEBUG: Generated new device ID $_deviceId');
+      }
+    }
+  }
 
   // Initialize Supabase client with retry logic
   static Future<void> initialize() async {
@@ -30,6 +48,9 @@ class SupabaseService {
         );
 
         _client = Supabase.instance.client;
+
+        // Ensure we have a device UUID for saved_styles operations
+        await _ensureDeviceId();
 
         // Test the connection
         await _testConnection();
@@ -397,6 +418,49 @@ class SupabaseService {
 
       return mainHairstyleResponse['image_url'] ?? '';
     });
+  }
+
+  // ===================== SAVED STYLES =====================
+
+  static Future<void> saveStyle(int hairstyleId) async {
+    await _executeWithRetry(() async {
+      await _ensureDeviceId();
+      final uid = _deviceId!;
+      await _client.from('saved_styles').upsert({
+        'user_id': uid,
+        'hairstyle_id': hairstyleId,
+      });
+    });
+  }
+
+  static Future<void> unsaveStyle(int hairstyleId) async {
+    await _executeWithRetry(() async {
+      await _ensureDeviceId();
+      final uid = _deviceId!;
+      await _client
+          .from('saved_styles')
+          .delete()
+          .eq('user_id', uid)
+          .eq('hairstyle_id', hairstyleId);
+    });
+  }
+
+  static Future<List<int>> fetchSavedStyleIds() async {
+    return await _executeWithRetry(() async {
+      await _ensureDeviceId();
+      final uid = _deviceId!;
+      final res = await _client
+          .from('saved_styles')
+          .select('hairstyle_id')
+          .eq('user_id', uid);
+      return (res as List).map((e) => e['hairstyle_id'] as int).toList();
+    });
+  }
+
+  static Future<List<HairstyleData>> fetchSavedStyles() async {
+    final ids = await fetchSavedStyleIds();
+    if (ids.isEmpty) return [];
+    return await getHairstyles(rankedIds: ids);
   }
 
   // Check if the service is properly initialized
