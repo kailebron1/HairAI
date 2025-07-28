@@ -47,7 +47,21 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchHairstyles();
+    _initData();
+  }
+
+  Future<void> _initData() async {
+    await SupabaseService.initialize();
+    // Load saved style ids first so hearts render correctly
+    try {
+      final savedIds = await SupabaseService.fetchSavedStyleIds();
+      setState(() {
+        _likedStyles.clear();
+        _likedStyles.addAll(savedIds);
+      });
+    } catch (_) {}
+
+    await _fetchHairstyles();
   }
 
   @override
@@ -1036,18 +1050,21 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
 
   void _toggleLike(int index, HairstyleData hairstyle) async {
     setState(() {
-      if (_likedStyles.contains(index)) {
-        _likedStyles.remove(index);
-        // TODO: Implement removeLikedStyle from Supabase
+      if (_likedStyles.contains(hairstyle.id)) {
+        _likedStyles.remove(hairstyle.id);
       } else {
-        _likedStyles.add(index);
-        // TODO: Implement saveLikedStyle to Supabase
-        // StorageService.saveLikedStyle(
-        //   hairstyle: hairstyle,
-        //   uploadSessionId: _analysisResult!['id'],
-        // );
+        _likedStyles.add(hairstyle.id!);
       }
     });
+
+    // Persist change
+    if (hairstyle.id != null) {
+      if (_likedStyles.contains(hairstyle.id)) {
+        await SupabaseService.saveStyle(hairstyle.id!);
+      } else {
+        await SupabaseService.unsaveStyle(hairstyle.id!);
+      }
+    }
   }
 
   // Fetch hairstyles from Supabase
