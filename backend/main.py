@@ -227,6 +227,11 @@ async def analyze_image(request: ImageAnalysisRequest):
 
         analysis_data = json.loads(analysis_content)
 
+        # Backwards-compat: if the new prompt returns
+        # "best_face_shape_match" instead of "face_shape", map it.
+        if not analysis_data.get("face_shape") and analysis_data.get("best_face_shape_match"):
+            analysis_data["face_shape"] = analysis_data["best_face_shape_match"]
+
         # Validate the data with Pydantic, while also injecting the raw data
         validated_data = ImageAnalysisResult(
             face_shape=analysis_data.get("face_shape"),
