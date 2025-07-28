@@ -881,18 +881,6 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
                           : 'Save This Style',
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  GestureDetector(
-                    onTap: () => _toggleLike(hairstyle.id ?? 0, hairstyle),
-                    child: Icon(
-                      _likedStyles.contains(hairstyle.id)
-                          ? Icons.favorite
-                          : Icons.favorite_border,
-                      color: _likedStyles.contains(hairstyle.id)
-                          ? const Color(0xFF8B5CF6)
-                          : Colors.white54,
-                    ),
-                  ),
                 ],
               ),
             ),
