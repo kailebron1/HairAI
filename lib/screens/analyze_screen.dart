@@ -858,6 +858,44 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
                 ),
               ),
             ),
+            // Save / Like controls
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Column(
+                children: [
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _likedStyles.contains(hairstyle.id)
+                          ? const Color(0xFF8B5CF6)
+                          : const Color(0xFF374151),
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(36),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onPressed: () => _toggleLike(hairstyle.id ?? 0, hairstyle),
+                    child: Text(
+                      _likedStyles.contains(hairstyle.id)
+                          ? 'Saved'
+                          : 'Save This Style',
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  GestureDetector(
+                    onTap: () => _toggleLike(hairstyle.id ?? 0, hairstyle),
+                    child: Icon(
+                      _likedStyles.contains(hairstyle.id)
+                          ? Icons.favorite
+                          : Icons.favorite_border,
+                      color: _likedStyles.contains(hairstyle.id)
+                          ? const Color(0xFF8B5CF6)
+                          : Colors.white54,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
