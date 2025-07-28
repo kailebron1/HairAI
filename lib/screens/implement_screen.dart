@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/storage_service.dart';
 import '../services/supabase_service.dart';
+import 'explore_styles_screen.dart';
 
 class ImplementScreen extends StatefulWidget {
   const ImplementScreen({super.key});
@@ -11,8 +12,7 @@ class ImplementScreen extends StatefulWidget {
 }
 
 class _ImplementScreenState extends State<ImplementScreen> {
-  List<SavedHairstyle> _savedHairstyles = [];
-  List<HairstyleData> _allHairstyles = [];
+  List<HairstyleData> _savedHairstyles = [];
   bool _isLoading = true;
   bool _isSelectingStyle = false;
   HairstyleData? _selectedHairstyle;
@@ -34,13 +34,12 @@ class _ImplementScreenState extends State<ImplementScreen> {
 
   Future<void> _loadData() async {
     try {
-      // TODO: Re-implement saved hairstyles with Supabase.
-      // For now, load all hairstyles directly.
-      final allStyles = await SupabaseService.getHairstyles();
+      await SupabaseService.initialize();
+      final saved = await SupabaseService.fetchSavedStyles();
       if (!mounted) return;
 
       setState(() {
-        _allHairstyles = allStyles;
+        _savedHairstyles = saved;
         _isLoading = false;
       });
     } catch (e) {
@@ -135,7 +134,7 @@ class _ImplementScreenState extends State<ImplementScreen> {
                 ),
               )
             else
-              _buildHairstylesGallery(_allHairstyles),
+              _buildHairstylesGallery(_savedHairstyles),
 
             // The rest of the content below the gallery is wrapped in padding
             Padding(
@@ -177,19 +176,67 @@ class _ImplementScreenState extends State<ImplementScreen> {
 
   // Reusable horizontal gallery builder - reverted to simple version
   Widget _buildHairstylesGallery(List<HairstyleData> styles) {
+    // Append dummy item for Explore card as last element
+    final list = [...styles];
+    list.add(
+      HairstyleData(
+        id: -1,
+        name: 'Explore All Styles',
+        description: '',
+        imageUrl: '',
+      ),
+    );
     return SizedBox(
       height: 450, // Match AnalyzeScreen
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: styles.length,
+        itemCount: list.length,
         itemBuilder: (context, index) {
+          final h = list[index];
           return Container(
             width: 260,
-            margin: EdgeInsets.only(right: index == styles.length - 1 ? 0 : 16),
-            child: _buildHairstyleCard(styles[index]),
+            margin: EdgeInsets.only(right: index == list.length - 1 ? 0 : 16),
+            child: h.id == -1 ? _buildExploreCard() : _buildHairstyleCard(h),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildExploreCard() {
+    return GestureDetector(
+      onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const ExploreStylesScreen()),
+        );
+        // Refresh saved styles on return
+        await _loadData();
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF2D2D2D),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF8B5CF6), width: 2),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              Icon(Icons.explore, color: Color(0xFF8B5CF6), size: 48),
+              SizedBox(height: 12),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'Explore All Styles',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
