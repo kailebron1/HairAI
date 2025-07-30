@@ -463,6 +463,51 @@ class SupabaseService {
     return await getHairstyles(rankedIds: ids);
   }
 
+  static Future<void> saveImplementationGuide({
+    required int hairstyleId,
+    required Map<String, dynamic> guide,
+  }) async {
+    return await _executeWithRetry(() async {
+      await _ensureDeviceId(); // Ensure device ID is available
+      final uid = _deviceId!;
+      await _client.from('implementation_guides').upsert({
+        'user_id': uid,
+        'target_style_id': hairstyleId,
+        'analysis_result': guide,
+      });
+    });
+  }
+
+  static Future<List<Map<String, dynamic>>> getSavedGuides() async {
+    return await _executeWithRetry(() async {
+      await _ensureDeviceId(); // Ensure device ID is available
+      final uid = _deviceId!;
+      final response = await _client
+          .from('implementation_guides')
+          .select('*, hairstyles(*)')
+          .eq('user_id', uid)
+          .order('created_at', ascending: false);
+
+      return (response as List).map((guide) {
+        final hairstyle = HairstyleData.fromSupabase(guide['hairstyles']);
+        return {
+          'id': guide['id'],
+          'hairstyle': hairstyle,
+          'guide': guide['analysis_result'],
+          'created_at': guide['created_at'],
+        };
+      }).toList();
+    });
+  }
+
+  static Future<void> deleteGuide(String guideId) async {
+    return await _executeWithRetry(() async {
+      await _ensureDeviceId(); // Ensure device ID is available
+      final uid = _deviceId!;
+      await _client.from('implementation_guides').delete().eq('id', guideId);
+    });
+  }
+
   // Check if the service is properly initialized
   static bool get isInitialized => _isInitialized;
 

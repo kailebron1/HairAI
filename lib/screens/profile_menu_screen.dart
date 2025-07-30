@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'my_uploads_screen.dart';
 import 'saved_styles_screen.dart';
+import 'saved_guides_screen.dart';
 import 'profile_screen.dart';
 import 'about_screen.dart';
 
@@ -91,6 +92,17 @@ class ProfileMenuScreen extends StatelessWidget {
                   context,
                   MaterialPageRoute(
                     builder: (context) => const SavedStylesScreen(),
+                  ),
+                ),
+              ),
+              _MenuItemData(
+                icon: Icons.book,
+                title: 'Implementation Guides',
+                subtitle: 'Your personalized hairstyle guides',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const SavedGuidesScreen(),
                   ),
                 ),
               ),

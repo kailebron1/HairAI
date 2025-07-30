@@ -19,7 +19,9 @@ class AnalysisService {
 
   static Future<Map<String, dynamic>> analyzeImage(String imageUrl) async {
     final requestBody = {'image_url': imageUrl};
-    print('DEBUG: Sending to /analyze with body: ${jsonEncode(requestBody)}');
+    if (kDebugMode) {
+      print('DEBUG: Sending to /analyze with body: ${jsonEncode(requestBody)}');
+    }
 
     try {
       final response = await http.post(
@@ -41,6 +43,85 @@ class AnalysisService {
     } catch (e) {
       if (kDebugMode) {
         print('Network or parsing error (/analyze): $e');
+      }
+      rethrow;
+    }
+  }
+
+  static Future<List<String>> recognizeProducts(String imageUrl) async {
+    final requestBody = {'image_url': imageUrl};
+    if (kDebugMode) {
+      print(
+        'DEBUG: Sending to /recognize-products with body: ${jsonEncode(requestBody)}',
+      );
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/recognize-products'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(requestBody),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return List<String>.from(data['products']);
+      } else {
+        if (kDebugMode) {
+          print(
+            'Backend Error (/recognize-products): ${response.statusCode} ${response.body}',
+          );
+        }
+        throw Exception(
+          'Failed to recognize products: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Network or parsing error (/recognize-products): $e');
+      }
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> getImplementationGuide({
+    required String userImageUrl,
+    required int targetStyleId,
+    required List<String> userProducts,
+  }) async {
+    final requestBody = {
+      'user_image_url': userImageUrl,
+      'target_style_id': targetStyleId,
+      'user_products': userProducts,
+    };
+    if (kDebugMode) {
+      print(
+        'DEBUG: Sending to /implementation-guide with body: ${jsonEncode(requestBody)}',
+      );
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/implementation-guide'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(requestBody),
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        if (kDebugMode) {
+          print(
+            'Backend Error (/implementation-guide): ${response.statusCode} ${response.body}',
+          );
+        }
+        throw Exception(
+          'Failed to get implementation guide: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Network or parsing error (/implementation-guide): $e');
       }
       rethrow;
     }
