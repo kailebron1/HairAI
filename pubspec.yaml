@@ -37,7 +37,6 @@ dependencies:
   uuid: ^3.0.7
   cached_network_image: ^3.3.1
   file_picker: ^8.0.0+1
-  aws_rekognition_api: ^2.0.0
   http: ^1.2.1
 
 dev_dependencies:
