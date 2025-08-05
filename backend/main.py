@@ -76,6 +76,11 @@ class RecommendationRequest(BaseModel):
     analysis_result: ImageAnalysisResult
     quiz_data: Dict[str, Any]
 
+class ImplementationGuideRequest(BaseModel):
+    user_image_url: str
+    target_style_id: int
+    user_products: List[str]
+
 class Hairstyle(BaseModel):
     id: int
     name: str
@@ -108,6 +113,65 @@ app.add_middleware(
 
 
 # --- System Prompts for OpenAI ---
+IMPLEMENTATION_GUIDE_PROMPT_TEMPLATE = """You are an expert AI stylist. Your task is to create a detailed, personalized implementation guide for a user who wants to achieve a target hairstyle.
+
+**INPUTS:**
+1.  **User's Current Hair:** Analyzed from an image. You will need to re-analyze this image.
+2.  **Target Hairstyle:** Details of the desired hairstyle, fetched from the database.
+3.  **User's Current Products:** A list of hair products the user already owns.
+
+**TASK:**
+1.  **Analyze the user's hair** from the provided image URL (`user_image_url`), focusing on:
+    *   Hair Type (e.g., Straight, Wavy, Curly, Coily)
+    *   Hair Length (e.g., Short, Medium, Long)
+    *   Hair Health (e.g., Healthy, Damaged, Dry)
+2.  **Compare the user's current hair** to the `target_hairstyle`.
+3.  **Generate a step-by-step guide** on how to achieve the target hairstyle, taking into account the user's starting point.
+4.  **Recommend specific products** that would be helpful.
+    *   Incorporate the `user_products` where applicable.
+    *   Suggest new products from the `products` database where necessary.
+5.  **Provide maintenance tips** to help the user maintain their new style.
+6.  **Estimate the time** it might take to achieve the desired look.
+
+**STRICT OUTPUT FORMAT (FOLLOW EXACTLY):**
+-   Output must be a single JSON object with the following keys:
+    -   `current_analysis`: An object with `hair_type`, `hair_length`, and `hair_health`.
+    -   `recommended_products`: An array of objects, each with `name`, `reason`, and an affiliate `link`.
+    -   `steps`: An array of strings, with each string being a single step in the guide.
+    -   `maintenance`: An array of strings, with each string being a maintenance tip.
+    -   `estimated_time`: A string representing the estimated time (e.g., "6-8 weeks").
+
+**EXAMPLE:**
+```json
+{
+  "current_analysis": {
+    "hair_type": "Wavy",
+    "hair_length": "Medium",
+    "hair_health": "Healthy"
+  },
+  "recommended_products": [
+    {
+      "name": "Sea Salt Spray",
+      "reason": "To enhance your natural waves.",
+      "link": "https://amazon.com/sample-link"
+    }
+  ],
+  "steps": [
+    "Wash and condition your hair with a volumizing shampoo.",
+    "Towel-dry your hair until it's damp, not soaking wet.",
+    "Apply sea salt spray evenly from roots to ends.",
+    "Scrunch your hair with your hands to encourage wave formation.",
+    "Either air-dry or use a diffuser on low heat."
+  ],
+  "maintenance": [
+    "Use a deep conditioner once a week to prevent dryness.",
+    "Avoid over-washing your hair to maintain natural oils."
+  ],
+  "estimated_time": "15-20 minutes for styling"
+}
+```
+"""
+
 IMAGE_ANALYSIS_PROMPT = """You are an expert AI assistant specializing in analyzing human facial attributes from images to recommend hairstyles.
 
 Analyze the most prominent face in the image and determine the following attributes.  
@@ -342,6 +406,50 @@ async def get_recommendations(request: RecommendationRequest):
         print(f"FATAL: Unhandled error in /recommend: {e}")
         raise HTTPException(status_code=500, detail=f"Unexpected server error: {e}")
 
+
+@app.post("/implementation-guide")
+async def get_implementation_guide(request: ImplementationGuideRequest):
+    """
+    Generates a personalized implementation guide for a target hairstyle.
+    """
+    try:
+        # 1. Fetch the target hairstyle from Supabase
+        target_style_response = supabase.from_("hairstyles").select("*").eq("id", request.target_style_id).single().execute()
+        if not target_style_response.data:
+            raise HTTPException(status_code=404, detail="Target hairstyle not found.")
+        target_style = target_style_response.data
+
+        # 2. Fetch all products from the database
+        products_response = supabase.from_("products").select("*").execute()
+        all_products = products_response.data or []
+
+        # 3. Create the payload for the OpenAI prompt
+        prompt_payload = {
+            "user_image_url": request.user_image_url,
+            "target_hairstyle": target_style,
+            "user_products": request.user_products,
+            "products_database": all_products,
+        }
+
+        # 4. Call OpenAI to generate the guide
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": IMPLEMENTATION_GUIDE_PROMPT_TEMPLATE},
+                {"role": "user", "content": json.dumps(prompt_payload)}
+            ],
+            response_format={"type": "json_object"},
+        )
+
+        if not response.choices or not response.choices[0].message.content:
+            raise HTTPException(status_code=500, detail="Failed to get a valid response from AI model.")
+
+        guide_data = json.loads(response.choices[0].message.content)
+        return guide_data
+
+    except Exception as e:
+        print(f"ERROR in /implementation-guide: {e}")
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 @app.get("/")
 def read_root():
